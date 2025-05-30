@@ -61,6 +61,27 @@ public class MessageClient {
         }
     }
 
+    public boolean register(String username, String password, String email) {
+    if (!connected) return false;
+    out.println("REGISTER:" + username + ":" + password + ":" + email);
+
+    try {
+        while (true) {
+            String response = messageQueue.take();
+            System.out.println("Register check, got from queue: " + response);
+            if ("REGISTER_SUCCESS".equals(response)) {
+                return true;
+            } else if ("REGISTER_FAILED".equals(response)) {
+                return false;
+            }
+        }
+    } catch (InterruptedException e) {
+        System.out.println("Registration interrupted: " + e.getMessage());
+        Thread.currentThread().interrupt();
+        return false;
+    }
+}
+
     public void sendMessage(String sessionId, String content) {
         if (!connected) return;
         out.println("MSG:" + sessionId + ":" + content);

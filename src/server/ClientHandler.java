@@ -52,7 +52,7 @@ public class ClientHandler implements Runnable {
 
     private void processMessage(String message) {
         System.out.println("Processing message: " + message); // Debug
-        String[] parts = message.split(":", 3);
+        String[] parts = message.split(":", 4);
 
         if (parts.length < 2) {
             System.out.println("Invalid message format: " + message);
@@ -60,6 +60,21 @@ public class ClientHandler implements Runnable {
         }
 
         String command = parts[0];
+
+        // Registration
+        if (command.equals("REGISTER") && parts.length >= 4) {
+            String username = parts[1];
+            String password = parts[2];
+            String email = parts[3];
+            System.out.println("Registering: " + username + " / " + email);
+
+            if (registerUser(username, password, email)) {
+                sendMessage("REGISTER_SUCCESS");
+            } else {
+                sendMessage("REGISTER_FAILED");
+            }
+            return;
+        }
 
         // Handle authentication
         if (command.equals("AUTH") && parts.length >= 3) {
@@ -103,7 +118,7 @@ public class ClientHandler implements Runnable {
     }
 
     private boolean authenticate(String username, String password) {
-        try (Connection conn = db.dbConnector.getConnection()) {
+        try (Connection conn = dbConnector.getConnection()) {
             String query = "SELECT * FROM users WHERE username = ? AND password = ?";
             PreparedStatement stmt = conn.prepareStatement(query);
             stmt.setString(1, username);
@@ -115,6 +130,21 @@ public class ClientHandler implements Runnable {
             return result;
         } catch (SQLException e) {
             System.out.println("Database error during authentication: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean registerUser(String username, String password, String email) {
+        try (Connection conn = dbConnector.getConnection()) {
+            String query = "INSERT INTO users (username, password, email) VALUES (?, ?, ?)";
+            PreparedStatement stmt = conn.prepareStatement(query);
+            stmt.setString(1, username);
+            stmt.setString(2, password);
+            stmt.setString(3, email);
+            stmt.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            System.out.println("Registration error: " + e.getMessage());
             return false;
         }
     }
