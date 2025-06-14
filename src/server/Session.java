@@ -1,48 +1,32 @@
 package server;
 
-import java.util.HashSet;
-import java.util.Set;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
-/**
- * Represents a chat session between multiple users.
- * This class demonstrates encapsulation by hiding internal data structures
- * and providing controlled access through methods.
- */
 public class Session {
-    private String sessionId;           // Unique identifier for this session
-    private Set<String> participants;   // Usernames of participants
-    private List<Message> messages;     // Messages in this session
-    private long creationTime;          // When the session was created
+    private String sessionId;
+    private Set<String> participants;
+    private List<Message> messages;
+    private long creationTime;
+    private String pendingInvite;  // Username with pending invitation
     
     /**
-     * Creates a new session with a randomly generated ID
+     * Creates a new chat session with a random UUID
      */
     public Session() {
         this.sessionId = UUID.randomUUID().toString();
         this.participants = new HashSet<>();
         this.messages = new ArrayList<>();
         this.creationTime = System.currentTimeMillis();
+        this.pendingInvite = null;
     }
     
     /**
      * Adds a user to this session
      * @param username The username to add
-     * @return true if the user was added, false if already present
+     * @return true if user was added, false if already present
      */
     public boolean addParticipant(String username) {
         return participants.add(username);
-    }
-    
-    /**
-     * Removes a user from this session
-     * @param username The username to remove
-     * @return true if the user was removed, false if not in session
-     */
-    public boolean removeParticipant(String username) {
-        return participants.remove(username);
     }
     
     /**
@@ -60,6 +44,30 @@ public class Session {
      */
     public boolean hasParticipant(String username) {
         return participants.contains(username);
+    }
+    
+    /**
+     * Sets a pending invitation for a user
+     * @param username The invited username
+     */
+    public void setInvitePending(String username) {
+        this.pendingInvite = username;
+    }
+    
+    /**
+     * Checks if a user has a pending invitation
+     * @param username The username to check
+     * @return true if the user has a pending invitation
+     */
+    public boolean isInvitePending(String username) {
+        return username.equals(pendingInvite);
+    }
+    
+    /**
+     * Clears any pending invitation
+     */
+    public void clearPendingInvite() {
+        this.pendingInvite = null;
     }
     
     // Getters - part of encapsulation to control access to private fields

@@ -22,6 +22,19 @@ public class dbInitializer {
             // Execute the SQL statement
             stmt.execute(createUsersTable);
             System.out.println("Database initialized successfully!");
+
+            String createContactsTable = 
+                "CREATE TABLE IF NOT EXISTS contacts (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "user_id INTEGER NOT NULL," +
+                "contact_id INTEGER NOT NULL," +
+                "FOREIGN KEY (user_id) REFERENCES users(id)," +
+                "FOREIGN KEY (contact_id) REFERENCES users(id)," +
+                "UNIQUE(user_id, contact_id)" +
+                ");";
+
+            stmt.execute(createContactsTable);
+            System.out.println("Contacts table initialized successfully!");
             
             // Insert a test user if none exists
             String checkUser = "SELECT COUNT(*) as count FROM users";

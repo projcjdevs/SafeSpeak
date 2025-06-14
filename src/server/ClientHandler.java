@@ -9,6 +9,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 import db.dbConnector;
 
@@ -115,6 +117,37 @@ public class ClientHandler implements Runnable {
             System.out.println("Creating session between " + username + " and " + recipient);
             server.createSession(username, recipient);
         }
+        // Handle session invitation response
+        else if (command.equals("ACCEPT_INVITATION") && parts.length >= 2) {
+            String sessionId = parts[1];
+            server.acceptSessionInvitation(sessionId, username);
+        }
+        else if (command.equals("REJECT_INVITATION") && parts.length >= 2) {
+            String sessionId = parts[1];
+            server.rejectSessionInvitation(sessionId, username);
+        }
+        // Handle contact search
+        else if (command.equals("SEARCH_CONTACT") && parts.length >= 2) {
+            String emailQuery = parts[1];
+            List<String> matches = searchContacts(emailQuery);
+            String result = "SEARCH_RESULTS:" + String.join(",", matches);
+            sendMessage(result);
+        }
+        // Handle contact add
+        else if (command.equals("ADD_CONTACT") && parts.length >= 2) {
+            String contactUsername = parts[1];
+            if (addContact(username, contactUsername)) {
+                sendMessage("CONTACT_ADDED:" + contactUsername);
+                // Send updated contact list
+                sendContactList();
+            } else {
+                sendMessage("CONTACT_ADD_FAILED:" + contactUsername);
+            }
+        }
+        // Request contact list
+        else if (command.equals("GET_CONTACTS")) {
+            sendContactList();
+        }
     }
 
     private boolean authenticate(String username, String password) {
@@ -146,6 +179,84 @@ public class ClientHandler implements Runnable {
         } catch (SQLException e) {
             System.out.println("Registration error: " + e.getMessage());
             return false;
+        }
+    }
+    
+    private List<String> searchContacts(String emailQuery) {
+        List<String> results = new ArrayList<>();
+        try (Connection conn = dbConnector.getConnection()) {
+            String query = "SELECT username FROM users WHERE email LIKE ? AND username != ?";
+            PreparedStatement stmt = conn.prepareStatement(query);
+            stmt.setString(1, "%" + emailQuery + "%");
+            stmt.setString(2, username);
+            
+            ResultSet rs = stmt.executeQuery();
+            while (rs.next()) {
+                results.add(rs.getString("username"));
+            }
+        } catch (SQLException e) {
+            System.out.println("Error searching contacts: " + e.getMessage());
+        }
+        return results;
+    }
+
+    private boolean addContact(String username, String contactUsername) {
+        try (Connection conn = dbConnector.getConnection()) {
+            // Get user IDs
+            int userId = getUserId(conn, username);
+            int contactId = getUserId(conn, contactUsername);
+            
+            if (userId == -1 || contactId == -1) return false;
+            
+            // Insert contact relationship
+            String query = "INSERT OR IGNORE INTO contacts (user_id, contact_id) VALUES (?, ?)";
+            PreparedStatement stmt = conn.prepareStatement(query);
+            stmt.setInt(1, userId);
+            stmt.setInt(2, contactId);
+            
+            int affected = stmt.executeUpdate();
+            return affected > 0;
+        } catch (SQLException e) {
+            System.out.println("Error adding contact: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private int getUserId(Connection conn, String username) throws SQLException {
+        String query = "SELECT id FROM users WHERE username = ?";
+        PreparedStatement stmt = conn.prepareStatement(query);
+        stmt.setString(1, username);
+        
+        ResultSet rs = stmt.executeQuery();
+        if (rs.next()) {
+            return rs.getInt("id");
+        }
+        return -1;
+    }
+
+    private void sendContactList() {
+        try (Connection conn = dbConnector.getConnection()) {
+            int userId = getUserId(conn, username);
+            
+            String query = 
+                "SELECT u.username FROM users u " +
+                "JOIN contacts c ON u.id = c.contact_id " +
+                "WHERE c.user_id = ?";
+            
+            PreparedStatement stmt = conn.prepareStatement(query);
+            stmt.setInt(1, userId);
+            
+            ResultSet rs = stmt.executeQuery();
+            List<String> contacts = new ArrayList<>();
+            
+            while (rs.next()) {
+                contacts.add(rs.getString("username"));
+            }
+            
+            String contactList = "CONTACT_LIST:" + String.join(",", contacts);
+            sendMessage(contactList);
+        } catch (SQLException e) {
+            System.out.println("Error fetching contacts: " + e.getMessage());
         }
     }
 
