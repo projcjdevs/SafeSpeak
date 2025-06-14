@@ -40,5 +40,13 @@
             "projectName": "SafeSpeak_46919a64"
         }
 
+        ,{
+            "type": "java",
+            "name": "WelcomeUI",
+            "request": "launch",
+            "mainClass": "client.WelcomeUI",
+            "projectName": "SafeSpeak_46919a64"
+        }
+
     ]
 }
