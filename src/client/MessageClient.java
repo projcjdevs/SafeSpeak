@@ -123,4 +123,30 @@ public class MessageClient {
             System.out.println("Error closing connection: " + e.getMessage());
         }
     }
+
+
+    public void acceptSessionInvitation(String sessionId) {
+        if (!connected) return;
+        out.println("ACCEPT_INVITATION:" + sessionId);
+    }
+
+    public void rejectSessionInvitation(String sessionId) {
+        if (!connected) return;
+        out.println("REJECT_INVITATION:" + sessionId);
+    }
+
+    public void searchContacts(String emailQuery) {
+        if (!connected) return;
+        out.println("SEARCH_CONTACT:" + emailQuery);
+    }
+
+    public void addContact(String username) {
+        if (!connected) return;
+        out.println("ADD_CONTACT:" + username);
+    }
+
+    public void requestContactList() {
+        if (!connected) return;
+        out.println("GET_CONTACTS");
+}
 }

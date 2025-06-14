@@ -1,168 +1,385 @@
 package client;
 
 import javax.swing.*;
+import javax.swing.event.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class ChatUI extends JFrame {
     private MessageClient client;
-    private JTextArea chatArea;
-    private JTextField messageField;
-    private JButton sendButton;
+    private String username;
+    
+    // Main UI components
+    private JTabbedPane chatTabs;
     private JList<String> userList;
     private DefaultListModel<String> userListModel;
-    private Map<String, JTextArea> sessionChats = new HashMap<>();
-    private String currentSessionId = null;
+    private JList<String> contactList;
+    private DefaultListModel<String> contactListModel;
+    private Map<String, JTextArea> chatAreas = new HashMap<>();
+    private Map<String, JTextField> inputFields = new HashMap<>();
+    
+    // Track active sessions
+    private Map<String, String> sessions = new HashMap<>(); // sessionId -> recipient
     
     public ChatUI(MessageClient client) {
         this.client = client;
-        client.setMessageHandler(this::handleServerMessage);
         setupUI();
+        
+        // Register message handler with client
+        client.setMessageHandler(this::processServerMessage);
+        
+        // Request contacts when starting
+        client.requestContactList();
     }
     
     private void setupUI() {
         setTitle("SafeSpeak Chat");
-        setSize(700, 500);
+        setSize(800, 600);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
         
-        // Main panel with BorderLayout
-        JPanel mainPanel = new JPanel(new BorderLayout(5, 5));
-        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        // Main split pane
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
+        splitPane.setResizeWeight(0.7);
         
-        // Chat area
-        chatArea = new JTextArea();
-        chatArea.setEditable(false);
-        chatArea.setLineWrap(true);
-        JScrollPane chatScroll = new JScrollPane(chatArea);
-        mainPanel.add(chatScroll, BorderLayout.CENTER);
+        // Chat area (left side)
+        chatTabs = new JTabbedPane();
+        splitPane.setLeftComponent(chatTabs);
         
-        // User list on the right
+        // User panel (right side)
+        JPanel rightPanel = new JPanel(new BorderLayout());
+        
+        // Online users section
+        JPanel userPanel = new JPanel(new BorderLayout());
+        userPanel.setBorder(BorderFactory.createTitledBorder("Online Users"));
+        
         userListModel = new DefaultListModel<>();
         userList = new JList<>(userListModel);
-        userList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        userList.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                String selectedUser = userList.getSelectedValue();
-                if (selectedUser != null) {
-                    startChatWithUser(selectedUser);
+        JScrollPane userListScroll = new JScrollPane(userList);
+        userPanel.add(userListScroll, BorderLayout.CENTER);
+        
+        // Contact panel
+        JPanel contactPanel = new JPanel(new BorderLayout());
+        contactPanel.setBorder(BorderFactory.createTitledBorder("Known Connections"));
+        
+        contactListModel = new DefaultListModel<>();
+        contactList = new JList<>(contactListModel);
+        JScrollPane contactScroll = new JScrollPane(contactList);
+        
+        JPanel contactButtonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JButton addContactButton = new JButton("Add Contact");
+        addContactButton.addActionListener(e -> showContactSearchDialog());
+        contactButtonPanel.add(addContactButton);
+        
+        contactPanel.add(contactScroll, BorderLayout.CENTER);
+        contactPanel.add(contactButtonPanel, BorderLayout.SOUTH);
+        
+        // Add both panels to the right side
+        rightPanel.add(userPanel, BorderLayout.NORTH);
+        rightPanel.add(contactPanel, BorderLayout.CENTER);
+        
+        splitPane.setRightComponent(rightPanel);
+        
+        // Add the split pane to the frame
+        add(splitPane, BorderLayout.CENTER);
+        
+        // Add user list selection handling
+        userList.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    String recipient = userList.getSelectedValue();
+                    if (recipient != null) {
+                        client.createSession(recipient);
+                    }
                 }
             }
         });
-        JScrollPane userScroll = new JScrollPane(userList);
-        userScroll.setPreferredSize(new Dimension(150, 0));
-        mainPanel.add(userScroll, BorderLayout.EAST);
         
-        // Message input at bottom
-        JPanel inputPanel = new JPanel(new BorderLayout(5, 0));
-        messageField = new JTextField();
-        inputPanel.add(messageField, BorderLayout.CENTER);
+        // Add contact list selection handling
+        contactList.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    String recipient = contactList.getSelectedValue();
+                    if (recipient != null) {
+                        client.createSession(recipient);
+                    }
+                }
+            }
+        });
         
-        sendButton = new JButton("Send");
-        sendButton.addActionListener(e -> sendMessage());
-        inputPanel.add(sendButton, BorderLayout.EAST);
-        
-        mainPanel.add(inputPanel, BorderLayout.SOUTH);
-        
-        // Add the main panel to the frame
-        add(mainPanel);
-        
-        // Allow enter to send message
-        messageField.addActionListener(e -> sendMessage());
+        // Add welcome tab
+        JPanel welcomePanel = new JPanel(new BorderLayout());
+        JLabel welcomeLabel = new JLabel("Welcome to SafeSpeak! Select a user to start chatting.", SwingConstants.CENTER);
+        welcomeLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        welcomePanel.add(welcomeLabel, BorderLayout.CENTER);
+        chatTabs.addTab("Welcome", welcomePanel);
         
         setVisible(true);
     }
     
-    private void handleServerMessage(String message) {
-        SwingUtilities.invokeLater(() -> {
-            try {
-                String[] parts = message.split(":", 4); // Limit to 4 parts
+    private void processServerMessage(String message) {
+        System.out.println("Processing message in UI: " + message);
+        String[] parts = message.split(":");
+        
+        if (parts.length < 1) return;
+        
+        String command = parts[0];
+        
+        // Handle different message types
+        switch (command) {
+            case "USERLIST":
+                updateUserList(parts.length > 1 ? parts[1].split(",") : new String[0]);
+                break;
                 
-                if (parts.length < 2) return;
-                
-                String command = parts[0];
-                
-                if ("USERLIST".equals(command)) {
-                    // Update user list
-                    userListModel.clear();
-                    if (parts.length > 1 && !parts[1].isEmpty()) {
-                        for (String user : parts[1].split(",")) {
-                            userListModel.addElement(user);
-                        }
-                    }
-                }
-                else if ("SESSION_CREATED".equals(command) && parts.length >= 3) {
+            case "SESSION_CREATED":
+                if (parts.length >= 3) {
                     String sessionId = parts[1];
-                    String otherUser = parts[2];
-                    currentSessionId = sessionId;
-                    
-                    // Create a chat session if it doesn't exist
-                    if (!sessionChats.containsKey(sessionId)) {
-                        sessionChats.put(sessionId, new JTextArea());
-                    }
-                    
-                    // Update chat display
-                    chatArea.setText("");
-                    chatArea.append("--- Chat session with " + otherUser + " ---\n");
-                    chatArea.append(sessionChats.get(sessionId).getText());
+                    String recipient = parts[2];
+                    boolean pending = parts.length > 3 && parts[3].equals("PENDING");
+                    handleSessionCreated(sessionId, recipient, pending);
                 }
-                else if ("SESSION_INVITED".equals(command) && parts.length >= 3) {
+                break;
+                
+            case "SESSION_INVITATION":
+                if (parts.length >= 3) {
                     String sessionId = parts[1];
                     String inviter = parts[2];
-                    currentSessionId = sessionId;
-                    
-                    // Create a chat session if it doesn't exist
-                    if (!sessionChats.containsKey(sessionId)) {
-                        sessionChats.put(sessionId, new JTextArea());
-                    }
-                    
-                    // Update chat display
-                    chatArea.setText("");
-                    chatArea.append("--- " + inviter + " invited you to chat ---\n");
-                    chatArea.append(sessionChats.get(sessionId).getText());
+                    showInvitationDialog(sessionId, inviter);
                 }
-                else if ("MSG".equals(command) && parts.length >= 4) {
+                break;
+                
+            case "SESSION_ACCEPTED":
+                if (parts.length >= 3) {
+                    String sessionId = parts[1];
+                    String accepter = parts[2];
+                    // Update pending status
+                    JOptionPane.showMessageDialog(this, accepter + " accepted your invitation!");
+                    updateChatAreaWithSystemMessage(sessionId, accepter + " joined the conversation");
+                }
+                break;
+                
+            case "SESSION_REJECTED":
+                if (parts.length >= 3) {
+                    String sessionId = parts[1];
+                    String rejecter = parts[2];
+                    JOptionPane.showMessageDialog(this, rejecter + " declined your invitation.");
+                    updateChatAreaWithSystemMessage(sessionId, rejecter + " declined the invitation");
+                }
+                break;
+                
+            case "MSG":
+                if (parts.length >= 4) {
                     String sessionId = parts[1];
                     String sender = parts[2];
                     String content = parts[3];
-                    
-                    if (currentSessionId != null && currentSessionId.equals(sessionId)) {
-                        // Add to chat
-                        appendMessage(sender + ": " + content);
-                    }
+                    displayMessage(sessionId, sender, content);
                 }
-            } catch (Exception e) {
-                System.err.println("Error processing message: " + e.getMessage());
+                break;
+                
+            case "SEARCH_RESULTS":
+                handleSearchResults(parts.length > 1 ? parts[1] : "");
+                break;
+                
+            case "CONTACT_LIST":
+                updateContactList(parts.length > 1 ? parts[1].split(",") : new String[0]);
+                break;
+                
+            case "CONTACT_ADDED":
+                if (parts.length >= 2) {
+                    String contact = parts[1];
+                    JOptionPane.showMessageDialog(this, contact + " added to your contacts!");
+                    client.requestContactList(); // Refresh list
+                }
+                break;
+                
+            default:
+                System.out.println("Unknown command: " + command);
+        }
+    }
+    
+    private void updateUserList(String[] users) {
+        SwingUtilities.invokeLater(() -> {
+            userListModel.clear();
+            for (String user : users) {
+                // Don't show ourselves in the list
+                if (!user.isEmpty() && !user.equals(username)) {
+                    userListModel.addElement(user);
+                } else if (user.equals(username)) {
+                    // Set our username
+                    this.username = user;
+                    setTitle("SafeSpeak - " + username);
+                }
             }
         });
     }
     
-    private void appendMessage(String message) {
-        if (currentSessionId != null) {
-            JTextArea sessionChat = sessionChats.get(currentSessionId);
-            if (sessionChat != null) {
-                sessionChat.append(message + "\n");
-                chatArea.append(message + "\n");
-            }
-        }
+    private void handleSessionCreated(String sessionId, String recipient, boolean pending) {
+        SwingUtilities.invokeLater(() -> {
+            // Add to sessions map
+            sessions.put(sessionId, recipient);
+            
+            // Create UI for this session
+            createSessionTab(sessionId, recipient);
+            
+            // Add system message
+            String status = pending ? " (invitation pending)" : "";
+            updateChatAreaWithSystemMessage(sessionId, "Session started with " + recipient + status);
+        });
     }
     
-    private void sendMessage() {
-        if (currentSessionId == null) {
-            JOptionPane.showMessageDialog(this, "Please select a user to chat with first.");
-            return;
-        }
+    private void createSessionTab(String sessionId, String recipient) {
+        // Check if tab already exists
+        if (chatAreas.containsKey(sessionId)) return;
         
-        String message = messageField.getText().trim();
-        if (!message.isEmpty()) {
-            client.sendMessage(currentSessionId, message);
-            appendMessage("You: " + message);
-            messageField.setText("");
+        JPanel chatPanel = new JPanel(new BorderLayout());
+        
+        // Chat display area
+        JTextArea chatArea = new JTextArea();
+        chatArea.setEditable(false);
+        chatArea.setLineWrap(true);
+        chatArea.setWrapStyleWord(true);
+        JScrollPane chatScroll = new JScrollPane(chatArea);
+        chatPanel.add(chatScroll, BorderLayout.CENTER);
+        
+        // Input area
+        JPanel inputPanel = new JPanel(new BorderLayout());
+        JTextField inputField = new JTextField();
+        JButton sendButton = new JButton("Send");
+        
+        // Send action
+        ActionListener sendAction = e -> {
+            String message = inputField.getText().trim();
+            if (!message.isEmpty()) {
+                client.sendMessage(sessionId, message);
+                displayMessage(sessionId, "You", message);
+                inputField.setText("");
+            }
+        };
+        
+        inputField.addActionListener(sendAction);
+        sendButton.addActionListener(sendAction);
+        
+        inputPanel.add(inputField, BorderLayout.CENTER);
+        inputPanel.add(sendButton, BorderLayout.EAST);
+        
+        chatPanel.add(inputPanel, BorderLayout.SOUTH);
+        
+        // Store references
+        chatAreas.put(sessionId, chatArea);
+        inputFields.put(sessionId, inputField);
+        
+        // Add to tabs
+        chatTabs.addTab(recipient, chatPanel);
+        
+        // Select this tab
+        chatTabs.setSelectedComponent(chatPanel);
+    }
+    
+    private void displayMessage(String sessionId, String sender, String content) {
+        SwingUtilities.invokeLater(() -> {
+            JTextArea chatArea = chatAreas.get(sessionId);
+            
+            if (chatArea == null) {
+                // Create tab if it doesn't exist
+                String recipient = sessions.getOrDefault(sessionId, sender);
+                createSessionTab(sessionId, recipient);
+                chatArea = chatAreas.get(sessionId);
+            }
+            
+            // Add timestamp
+            SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss");
+            String timestamp = sdf.format(new Date());
+            
+            chatArea.append("[" + timestamp + "] " + sender + ": " + content + "\n");
+            chatArea.setCaretPosition(chatArea.getDocument().getLength());
+        });
+    }
+    
+    private void updateChatAreaWithSystemMessage(String sessionId, String message) {
+        SwingUtilities.invokeLater(() -> {
+            JTextArea chatArea = chatAreas.get(sessionId);
+            if (chatArea != null) {
+                SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss");
+                String timestamp = sdf.format(new Date());
+                chatArea.append("[" + timestamp + "] * " + message + " *\n");
+                chatArea.setCaretPosition(chatArea.getDocument().getLength());
+            }
+        });
+    }
+    
+    private void showInvitationDialog(String sessionId, String inviter) {
+        SwingUtilities.invokeLater(() -> {
+            String message = inviter + " wants to start a conversation with you.";
+            int choice = JOptionPane.showConfirmDialog(
+                this,
+                message,
+                "Chat Invitation",
+                JOptionPane.YES_NO_OPTION
+            );
+            
+            if (choice == JOptionPane.YES_OPTION) {
+                client.acceptSessionInvitation(sessionId);
+                // Create session tab
+                createSessionTab(sessionId, inviter);
+                sessions.put(sessionId, inviter);
+                updateChatAreaWithSystemMessage(sessionId, "You accepted " + inviter + "'s invitation");
+            } else {
+                client.rejectSessionInvitation(sessionId);
+            }
+        });
+    }
+    
+    private void showContactSearchDialog() {
+        String email = JOptionPane.showInputDialog(
+            this, 
+            "Enter email to search for contacts:", 
+            "Find Contacts", 
+            JOptionPane.QUESTION_MESSAGE
+        );
+        
+        if (email != null && !email.trim().isEmpty()) {
+            client.searchContacts(email.trim());
         }
     }
     
-    private void startChatWithUser(String username) {
-        client.createSession(username);
+    private void handleSearchResults(String results) {
+        SwingUtilities.invokeLater(() -> {
+            String[] users = results.isEmpty() ? new String[0] : results.split(",");
+            
+            if (users.length == 0) {
+                JOptionPane.showMessageDialog(this, "No users found with that email.");
+                return;
+            }
+            
+            JComboBox<String> userSelect = new JComboBox<>(users);
+            int option = JOptionPane.showConfirmDialog(
+                this,
+                new Object[]{"Select user to add:", userSelect},
+                "Add Contact",
+                JOptionPane.OK_CANCEL_OPTION
+            );
+            
+            if (option == JOptionPane.OK_OPTION) {
+                String selectedUser = (String) userSelect.getSelectedItem();
+                if (selectedUser != null) {
+                    client.addContact(selectedUser);
+                }
+            }
+        });
+    }
+    
+    private void updateContactList(String[] contacts) {
+        SwingUtilities.invokeLater(() -> {
+            contactListModel.clear();
+            for (String contact : contacts) {
+                if (!contact.isEmpty()) {
+                    contactListModel.addElement(contact);
+                }
+            }
+        });
     }
 }
