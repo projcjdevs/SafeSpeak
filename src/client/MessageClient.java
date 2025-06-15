@@ -67,10 +67,19 @@ public class MessageClient {
             
             boolean success = "AUTH_SUCCESS".equals(response);
             if (success) {
-                // Request contact list immediately after successful authentication
+                System.out.println("[CONTACTS] Requesting contact list immediately after login");
                 requestContactList();
-                // Request user list as well
-                requestUserList();
+                
+                // Request again after a delay to ensure database operations complete
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(1000);
+                        System.out.println("[CONTACTS] Delayed contact list request");
+                        requestContactList();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }).start();
             }
             return success;
         } catch (InterruptedException e) {

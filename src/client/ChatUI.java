@@ -24,28 +24,38 @@ public class ChatUI extends JFrame {
     // Track active sessions
     private Map<String, String> sessions = new HashMap<>(); // sessionId -> recipient
     
-public ChatUI(MessageClient client) {
-    this.client = client;
-    setupUI();
-    
-    // Register message handler with client
-    client.setMessageHandler(this::processServerMessage);
-    
-    // Request initial data immediately
-    System.out.println("Initial data request");
-    client.requestContactList();
-    client.requestUserList();
-    
-    // Set up startup sequence to retry user list requests
+    public ChatUI(MessageClient client) {
+        this.client = client;
+        setupUI();
+        
+        // Register message handler with client
+        client.setMessageHandler(this::processServerMessage);
+        
+        // Request initial data immediately
+        System.out.println("Initial data request");
+        client.requestContactList();
+        client.requestUserList();
+        
+        // Set up startup sequence to retry user list requests
         for (int i = 1; i <= 3; i++) {
             final int attempt = i;
             Timer initialTimer = new Timer(i * 1000, e -> {
                 System.out.println("Startup request #" + attempt);
                 client.requestUserList();
+                // ALSO request contact list on each retry
+                client.requestContactList();
             });
             initialTimer.setRepeats(false);
             initialTimer.start();
         }
+        
+        // Set up additional timer for contacts
+        Timer contactRefreshTimer = new Timer(2000, e -> {
+            System.out.println("Explicit contact list request");
+            client.requestContactList();
+        });
+        contactRefreshTimer.setRepeats(false);
+        contactRefreshTimer.start();
     }
     
     private void setupUI() {
@@ -90,6 +100,9 @@ public ChatUI(MessageClient client) {
         contactList = new JList<>(contactListModel);
         JScrollPane contactScroll = new JScrollPane(contactList);
         
+        // NOW call setupContactListInteraction() after contactList is initialized
+        setupContactListInteraction();
+        
         JPanel contactButtonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton addContactButton = new JButton("Add Contact");
         addContactButton.addActionListener(e -> showContactSearchDialog());
@@ -121,19 +134,6 @@ public ChatUI(MessageClient client) {
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2) {
                     String recipient = userList.getSelectedValue();
-                    if (recipient != null) {
-                        client.createSession(recipient);
-                    }
-                }
-            }
-        });
-        
-        // Add contact list selection handling
-        contactList.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    String recipient = contactList.getSelectedValue();
                     if (recipient != null) {
                         client.createSession(recipient);
                     }
@@ -426,6 +426,40 @@ public ChatUI(MessageClient client) {
                 if (!contact.isEmpty()) {
                     contactListModel.addElement(contact);
                     System.out.println("Added contact to list: " + contact);
+                }
+            }
+        });
+    }
+
+        private void setupContactListInteraction() {
+        contactList.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    String contactName = contactList.getSelectedValue();
+                    if (contactName != null) {
+                        // Check if user is online by searching the user list model
+                        boolean isOnline = false;
+                        for (int i = 0; i < userListModel.getSize(); i++) {
+                            if (userListModel.getElementAt(i).equals(contactName)) {
+                                isOnline = true;
+                                break;
+                            }
+                        }
+                        
+                        if (isOnline) {
+                            // If online, create session
+                            client.createSession(contactName);
+                        } else {
+                            // If offline, show message
+                            JOptionPane.showMessageDialog(
+                                ChatUI.this,
+                                contactName + " is currently offline.",
+                                "User Offline",
+                                JOptionPane.INFORMATION_MESSAGE
+                            );
+                        }
+                    }
                 }
             }
         });

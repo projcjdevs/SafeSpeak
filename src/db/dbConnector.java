@@ -6,7 +6,7 @@ import java.sql.SQLException;
 
 public class dbConnector {
     // Use an absolute path or user directory for more reliable path resolution
-    private static final String url = "jdbc:sqlite:" + System.getProperty("user.dir") + "/safespeak.db";
+    private static final String url = "jdbc:sqlite:C:/Users/Charles/Documents/SafeSpeak/safespeak.db";
     
     static {
         try {

@@ -11,6 +11,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.sql.Statement; 
 
 import db.dbConnector;
 
@@ -241,18 +242,24 @@ public class ClientHandler implements Runnable {
     }
 
     private boolean addContact(String username, String contactUsername) {
-        try (Connection conn = dbConnector.getConnection()) {
+        Connection conn = null;
+        try {
+            conn = dbConnector.getConnection();
+            conn.setAutoCommit(false); // Start transaction
+            
+            System.out.println("[CONTACTS] Adding contact: " + username + " -> " + contactUsername);
+            
             // Get user IDs
             int userId = getUserId(conn, username);
             int contactId = getUserId(conn, contactUsername);
             
             if (userId == -1) {
-                System.out.println("Cannot add contact: User ID not found for " + username);
+                System.out.println("[CONTACTS] Cannot add contact: User ID not found for " + username);
                 return false;
             }
             
             if (contactId == -1) {
-                System.out.println("Cannot add contact: Contact ID not found for " + contactUsername);
+                System.out.println("[CONTACTS] Cannot add contact: Contact ID not found for " + contactUsername);
                 return false;
             }
             
@@ -263,24 +270,53 @@ public class ClientHandler implements Runnable {
             stmt.setInt(2, contactId);
             
             int affected = stmt.executeUpdate();
-            System.out.println("Added contact relationship: " + username + " -> " + contactUsername 
-                             + " (rows affected: " + affected + ")");
-                             
-            // For debugging: verify the contact was added
+            System.out.println("[CONTACTS] Added contact relationship: " + username + " -> " + contactUsername 
+                            + " (rows affected: " + affected + ")");
+            
+            // Verify the contact was added
             String checkQuery = "SELECT COUNT(*) FROM contacts WHERE user_id = ? AND contact_id = ?";
             PreparedStatement checkStmt = conn.prepareStatement(checkQuery);
             checkStmt.setInt(1, userId);
             checkStmt.setInt(2, contactId);
             ResultSet rs = checkStmt.executeQuery();
+            
+            boolean success = false;
             if (rs.next()) {
-                System.out.println("Verified contact relationship exists: " + rs.getInt(1) + " rows found");
+                int count = rs.getInt(1);
+                System.out.println("[CONTACTS] Contact relationship exists: " + count + " rows found");
+                success = count > 0;
             }
             
-            return true; // Even if already exists (affected = 0), consider it success
+            if (success) {
+                conn.commit(); // Commit transaction
+                System.out.println("[CONTACTS] Contact addition committed to database");
+            } else {
+                conn.rollback(); // Rollback if verification failed
+                System.out.println("[CONTACTS] Contact addition failed verification, rolled back");
+            }
+            
+            return success;
         } catch (SQLException e) {
-            System.out.println("Error adding contact: " + e.getMessage());
+            System.out.println("[CONTACTS] Error adding contact: " + e.getMessage());
             e.printStackTrace();
+            if (conn != null) {
+                try {
+                    conn.rollback();
+                    System.out.println("[CONTACTS] Rolled back transaction due to error");
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                }
+            }
             return false;
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.setAutoCommit(true);
+                    conn.close();
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                }
+            }
         }
     }
 
@@ -298,7 +334,18 @@ public class ClientHandler implements Runnable {
 
     private void sendContactList() {
         try (Connection conn = dbConnector.getConnection()) {
-            System.out.println("Fetching contact list for " + username);
+            System.out.println("[CONTACTS] Fetching contact list for " + username);
+            
+            // Debug query to check for the existence of the contacts table
+            try (Statement checkStmt = conn.createStatement()) {
+                ResultSet tableCheck = checkStmt.executeQuery(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='contacts'");
+                if (!tableCheck.next()) {
+                    System.out.println("[CONTACTS] WARNING: contacts table doesn't exist!");
+                } else {
+                    System.out.println("[CONTACTS] contacts table exists.");
+                }
+            }
             
             // First get the user ID from username
             String userIdQuery = "SELECT id FROM users WHERE username = ?";
@@ -307,15 +354,32 @@ public class ClientHandler implements Runnable {
             ResultSet userRs = userStmt.executeQuery();
             
             if (!userRs.next()) {
-                System.out.println("Cannot fetch contacts: User ID not found for " + username);
+                System.out.println("[CONTACTS] Cannot fetch contacts: User ID not found for " + username);
                 sendMessage("CONTACT_LIST:");
                 return;
             }
             
             int userId = userRs.getInt("id");
-            System.out.println("Found user ID for " + username + ": " + userId);
+            System.out.println("[CONTACTS] Found user ID for " + username + ": " + userId);
             
-            // Now get their contacts
+            // Check raw contacts for this user
+            String rawQuery = "SELECT * FROM contacts WHERE user_id = ?";
+            PreparedStatement rawStmt = conn.prepareStatement(rawQuery);
+            rawStmt.setInt(1, userId);
+            ResultSet rawRs = rawStmt.executeQuery();
+            
+            System.out.println("[CONTACTS] Raw contacts for user ID " + userId + ":");
+            boolean hasAny = false;
+            while (rawRs.next()) {
+                hasAny = true;
+                System.out.println("  - Contact ID: " + rawRs.getInt("contact_id"));
+            }
+            
+            if (!hasAny) {
+                System.out.println("[CONTACTS] No raw contact records found.");
+            }
+            
+            // Now get their contacts - use a JOIN to get usernames directly
             String query = 
                 "SELECT u.username FROM users u " +
                 "JOIN contacts c ON u.id = c.contact_id " +
@@ -330,14 +394,23 @@ public class ClientHandler implements Runnable {
             while (rs.next()) {
                 String contactName = rs.getString("username");
                 contacts.add(contactName);
-                System.out.println("Found contact for " + username + ": " + contactName);
+                System.out.println("[CONTACTS] Found contact for " + username + ": " + contactName);
             }
             
             String contactList = "CONTACT_LIST:" + String.join(",", contacts);
-            System.out.println("Sending contact list to " + username + ": " + contactList);
+            System.out.println("[CONTACTS] Sending contact list to " + username + ": " + contactList);
             sendMessage(contactList);
+            
+            // DEBUG: Verify contacts in database 
+            String debugQuery = "SELECT COUNT(*) FROM contacts WHERE user_id = ?";
+            PreparedStatement debugStmt = conn.prepareStatement(debugQuery);
+            debugStmt.setInt(1, userId);
+            ResultSet debugRs = debugStmt.executeQuery();
+            if (debugRs.next()) {
+                System.out.println("[CONTACTS] Total contacts in database for " + username + ": " + debugRs.getInt(1));
+            }
         } catch (SQLException e) {
-            System.out.println("Error fetching contacts: " + e.getMessage());
+            System.out.println("[CONTACTS] Error fetching contacts: " + e.getMessage());
             e.printStackTrace();
             sendMessage("CONTACT_LIST:");
         }
