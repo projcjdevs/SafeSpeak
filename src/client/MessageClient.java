@@ -23,8 +23,6 @@ public class MessageClient {
         messageQueue = new LinkedBlockingQueue<>();
     }
 
-
-
     public boolean connect(String host, int port) {
         try {
             System.out.println("Client " + clientId + " connecting to server " + host + ":" + port);
@@ -170,17 +168,15 @@ public class MessageClient {
             while (connected && (message = in.readLine()) != null) {
                 System.out.println("Received from server: " + message);
                 
-                // Add to queue for auth/register handling
-                messageQueue.put(message);
-                
-                // Also pass to UI handler if set
-                if (messageHandler != null) {
-                    // Only skip direct handling for authentication messages
-                    if (message.equals("AUTH_SUCCESS") || message.equals("AUTH_FAILED") ||
-                        message.equals("REGISTER_SUCCESS") || message.equals("REGISTER_FAILED")) {
-                        // These messages are already handled by the queue
-                    } else {
-                        // UI-relevant messages
+                // FIXED: Handle authentication messages separately from UI messages
+                if (message.equals("AUTH_SUCCESS") || message.equals("AUTH_FAILED") ||
+                    message.equals("REGISTER_SUCCESS") || message.equals("REGISTER_FAILED")) {
+                    // Only put authentication messages in the queue
+                    messageQueue.put(message);
+                } else {
+                    // Send all other messages directly to UI handler
+                    if (messageHandler != null) {
+                        System.out.println("Sending message to UI handler: " + message);
                         messageHandler.accept(message);
                     }
                 }

@@ -57,12 +57,35 @@ public class ClientHandler implements Runnable {
         System.out.println("Processing message: " + message); // Debug
         String[] parts = message.split(":", 4); // Split with limit to handle content with colons
 
+        // FIXED: Check for single-part commands first
+        String command = parts[0];
+        
+        // Handle single-part commands that don't need validation
+        if (command.equals("GET_CONTACTS")) {
+            if (!authenticated) {
+                sendMessage("NOT_AUTHENTICATED");
+                return;
+            }
+            System.out.println(username + " requested contact list");
+            sendContactList();
+            return;
+        }
+        
+        if (command.equals("GET_USERS")) {
+            if (!authenticated) {
+                sendMessage("NOT_AUTHENTICATED");
+                return;
+            }
+            System.out.println(username + " requested user list");
+            server.sendUserListToClient(username);
+            return;
+        }
+
+        // For multi-part commands, check minimum length
         if (parts.length < 2) {
             System.out.println("Invalid message format: " + message);
             return;
         }
-
-        String command = parts[0];
 
         // Registration
         if (command.equals("REGISTER") && parts.length >= 4) {
@@ -151,17 +174,9 @@ public class ClientHandler implements Runnable {
                 sendMessage("CONTACT_ADD_FAILED:" + contactUsername);
             }
         }
-        // Request contact list
-        else if (command.equals("GET_CONTACTS")) {
-            System.out.println(username + " requested contact list");
-            sendContactList();
-        }
-        // Request user list
-        else if (command.equals("GET_USERS")) {
-            System.out.println(username + " requested user list");
-            server.sendUserListToClient(username);
-        }
     }
+
+    // ... rest of your existing methods (authenticate, registerUser, etc.) remain unchanged ...
 
     private boolean authenticate(String username, String password) {
         try (Connection conn = dbConnector.getConnection()) {

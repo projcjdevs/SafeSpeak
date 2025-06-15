@@ -1,7 +1,6 @@
 package client;
 
 import javax.swing.*;
-import javax.swing.event.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.text.SimpleDateFormat;
@@ -11,8 +10,7 @@ import javax.swing.Timer;
 public class ChatUI extends JFrame {
     private MessageClient client;
     private String username;
-    
-    // Main UI components
+
     private JTabbedPane chatTabs;
     private JList<String> userList;
     private DefaultListModel<String> userListModel;
@@ -20,22 +18,17 @@ public class ChatUI extends JFrame {
     private DefaultListModel<String> contactListModel;
     private Map<String, JTextArea> chatAreas = new HashMap<>();
     private Map<String, JTextField> inputFields = new HashMap<>();
-    
-    // Track active sessions
-    private Map<String, String> sessions = new HashMap<>(); // sessionId -> recipient
-    
+    private Map<String, String> sessions = new HashMap<>();
+
     public ChatUI(MessageClient client) {
         this.client = client;
         setupUI();
-        
-        // Register message handler with client
+
         client.setMessageHandler(this::processServerMessage);
-        
-        // Request initial data immediately
-        System.out.println("Initial data request");
+
         client.requestContactList();
         client.requestUserList();
-        
+
         // Set up startup sequence to retry user list requests
         for (int i = 1; i <= 3; i++) {
             final int attempt = i;
@@ -48,87 +41,72 @@ public class ChatUI extends JFrame {
             initialTimer.setRepeats(false);
             initialTimer.start();
         }
-        
-        // Set up additional timer for contacts
-        Timer contactRefreshTimer = new Timer(2000, e -> {
-            System.out.println("Explicit contact list request");
-            client.requestContactList();
-        });
-        contactRefreshTimer.setRepeats(false);
-        contactRefreshTimer.start();
+
+        Timer refreshTimer = new Timer(5000, e -> client.requestUserList());
+        refreshTimer.start();
     }
-    
+
     private void setupUI() {
         setTitle("SafeSpeak Chat");
         setSize(800, 600);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        
-        // Main split pane
+
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
         splitPane.setResizeWeight(0.7);
-        
-        // Chat area (left side)
+
         chatTabs = new JTabbedPane();
         splitPane.setLeftComponent(chatTabs);
-        
-        // User panel (right side)
+
         JPanel rightPanel = new JPanel(new BorderLayout());
-        
-        // Online users section
+
         JPanel userPanel = new JPanel(new BorderLayout());
         userPanel.setBorder(BorderFactory.createTitledBorder("Online Users"));
-        
+
         userListModel = new DefaultListModel<>();
         userList = new JList<>(userListModel);
         JScrollPane userListScroll = new JScrollPane(userList);
         userPanel.add(userListScroll, BorderLayout.CENTER);
-        
-        // Debug button for refreshing users
+
         JButton refreshButton = new JButton("Refresh Users");
         refreshButton.addActionListener(e -> {
             System.out.println("Manually refreshing user list");
             client.requestUserList();
         });
         userPanel.add(refreshButton, BorderLayout.SOUTH);
-        
-        // Contact panel
+
         JPanel contactPanel = new JPanel(new BorderLayout());
         contactPanel.setBorder(BorderFactory.createTitledBorder("Known Connections"));
-        
+
         contactListModel = new DefaultListModel<>();
         contactList = new JList<>(contactListModel);
         JScrollPane contactScroll = new JScrollPane(contactList);
-        
-        // NOW call setupContactListInteraction() after contactList is initialized
+
         setupContactListInteraction();
-        
+
         JPanel contactButtonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton addContactButton = new JButton("Add Contact");
         addContactButton.addActionListener(e -> showContactSearchDialog());
-        
+
         JButton refreshContactsButton = new JButton("Refresh Contacts");
         refreshContactsButton.addActionListener(e -> {
             System.out.println("Manually refreshing contacts");
             client.requestContactList();
         });
-        
+
         contactButtonPanel.add(addContactButton);
         contactButtonPanel.add(refreshContactsButton);
-        
+
         contactPanel.add(contactScroll, BorderLayout.CENTER);
         contactPanel.add(contactButtonPanel, BorderLayout.SOUTH);
-        
-        // Add both panels to the right side
+
         rightPanel.add(userPanel, BorderLayout.NORTH);
         rightPanel.add(contactPanel, BorderLayout.CENTER);
-        
+
         splitPane.setRightComponent(rightPanel);
-        
-        // Add the split pane to the frame
+
         add(splitPane, BorderLayout.CENTER);
-        
-        // Add user list selection handling
+
         userList.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -140,33 +118,59 @@ public class ChatUI extends JFrame {
                 }
             }
         });
-        
-        // Add welcome tab
+
         JPanel welcomePanel = new JPanel(new BorderLayout());
         JLabel welcomeLabel = new JLabel("Welcome to SafeSpeak! Select a user to start chatting.", SwingConstants.CENTER);
         welcomeLabel.setFont(new Font("Arial", Font.BOLD, 16));
         welcomePanel.add(welcomeLabel, BorderLayout.CENTER);
         chatTabs.addTab("Welcome", welcomePanel);
-        
+
         setVisible(true);
     }
-    
+
+    private void setupContactListInteraction() {
+        contactList.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    String contactName = contactList.getSelectedValue();
+                    if (contactName != null) {
+                        boolean isOnline = false;
+                        for (int i = 0; i < userListModel.size(); i++) {
+                            if (userListModel.getElementAt(i).equals(contactName)) {
+                                isOnline = true;
+                                break;
+                            }
+                        }
+                        if (isOnline) {
+                            client.createSession(contactName);
+                        } else {
+                            JOptionPane.showMessageDialog(
+                                ChatUI.this,
+                                contactName + " is currently offline.",
+                                "User Offline",
+                                JOptionPane.INFORMATION_MESSAGE
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     private void processServerMessage(String message) {
         System.out.println("Processing message in UI: " + message);
         String[] parts = message.split(":");
-        
+
         if (parts.length < 1) return;
-        
+
         String command = parts[0];
-        
-        // Handle different message types
+
         switch (command) {
             case "USERLIST":
                 String userListStr = parts.length > 1 ? parts[1] : "";
-                System.out.println("Received user list: " + userListStr);
                 updateUserList(userListStr.isEmpty() ? new String[0] : userListStr.split(","));
                 break;
-                
             case "SESSION_CREATED":
                 if (parts.length >= 3) {
                     String sessionId = parts[1];
@@ -175,7 +179,6 @@ public class ChatUI extends JFrame {
                     handleSessionCreated(sessionId, recipient, pending);
                 }
                 break;
-                
             case "SESSION_INVITATION":
                 if (parts.length >= 3) {
                     String sessionId = parts[1];
@@ -183,17 +186,14 @@ public class ChatUI extends JFrame {
                     showInvitationDialog(sessionId, inviter);
                 }
                 break;
-                
             case "SESSION_ACCEPTED":
                 if (parts.length >= 3) {
                     String sessionId = parts[1];
                     String accepter = parts[2];
-                    // Update pending status
                     JOptionPane.showMessageDialog(this, accepter + " accepted your invitation!");
                     updateChatAreaWithSystemMessage(sessionId, accepter + " joined the conversation");
                 }
                 break;
-                
             case "SESSION_REJECTED":
                 if (parts.length >= 3) {
                     String sessionId = parts[1];
@@ -202,7 +202,6 @@ public class ChatUI extends JFrame {
                     updateChatAreaWithSystemMessage(sessionId, rejecter + " declined the invitation");
                 }
                 break;
-                
             case "MSG":
                 if (parts.length >= 4) {
                     String sessionId = parts[1];
@@ -211,39 +210,32 @@ public class ChatUI extends JFrame {
                     displayMessage(sessionId, sender, content);
                 }
                 break;
-                
             case "SEARCH_RESULTS":
                 String searchResults = parts.length > 1 ? parts[1] : "";
-                System.out.println("Received search results: " + searchResults);
                 handleSearchResults(searchResults);
                 break;
-                
             case "CONTACT_LIST":
                 String contactsStr = parts.length > 1 ? parts[1] : "";
-                System.out.println("Received contact list: " + contactsStr);
+                System.out.println("***** UI RECEIVED CONTACT_LIST: " + contactsStr + " *****");
                 String[] contacts = contactsStr.isEmpty() ? new String[0] : contactsStr.split(",");
                 updateContactList(contacts);
                 break;
-                
             case "CONTACT_ADDED":
                 if (parts.length >= 2) {
                     String contact = parts[1];
                     JOptionPane.showMessageDialog(this, contact + " added to your contacts!");
-                    // Refresh contacts
                     client.requestContactList();
                 }
                 break;
-                
             default:
-                System.out.println("Unknown command: " + command);
         }
     }
-    
+
     private void updateUserList(String[] users) {
         SwingUtilities.invokeLater(() -> {
             userListModel.clear();
             System.out.println("Updating user list with " + users.length + " users: " + 
-                            Arrays.toString(users));
+                              Arrays.toString(users));
             
             for (String user : users) {
                 // Don't show ourselves in the list
@@ -261,41 +253,32 @@ public class ChatUI extends JFrame {
             }
         });
     }
-    
+
     private void handleSessionCreated(String sessionId, String recipient, boolean pending) {
         SwingUtilities.invokeLater(() -> {
-            // Add to sessions map
             sessions.put(sessionId, recipient);
-            
-            // Create UI for this session
             createSessionTab(sessionId, recipient);
-            
-            // Add system message
             String status = pending ? " (invitation pending)" : "";
             updateChatAreaWithSystemMessage(sessionId, "Session started with " + recipient + status);
         });
     }
-    
+
     private void createSessionTab(String sessionId, String recipient) {
-        // Check if tab already exists
         if (chatAreas.containsKey(sessionId)) return;
-        
+
         JPanel chatPanel = new JPanel(new BorderLayout());
-        
-        // Chat display area
+
         JTextArea chatArea = new JTextArea();
         chatArea.setEditable(false);
         chatArea.setLineWrap(true);
         chatArea.setWrapStyleWord(true);
         JScrollPane chatScroll = new JScrollPane(chatArea);
         chatPanel.add(chatScroll, BorderLayout.CENTER);
-        
-        // Input area
+
         JPanel inputPanel = new JPanel(new BorderLayout());
         JTextField inputField = new JTextField();
         JButton sendButton = new JButton("Send");
-        
-        // Send action
+
         ActionListener sendAction = e -> {
             String message = inputField.getText().trim();
             if (!message.isEmpty()) {
@@ -304,46 +287,40 @@ public class ChatUI extends JFrame {
                 inputField.setText("");
             }
         };
-        
+
         inputField.addActionListener(sendAction);
         sendButton.addActionListener(sendAction);
-        
+
         inputPanel.add(inputField, BorderLayout.CENTER);
         inputPanel.add(sendButton, BorderLayout.EAST);
-        
+
         chatPanel.add(inputPanel, BorderLayout.SOUTH);
-        
-        // Store references
+
         chatAreas.put(sessionId, chatArea);
         inputFields.put(sessionId, inputField);
-        
-        // Add to tabs
+
         chatTabs.addTab(recipient, chatPanel);
-        
-        // Select this tab
         chatTabs.setSelectedComponent(chatPanel);
     }
-    
+
     private void displayMessage(String sessionId, String sender, String content) {
         SwingUtilities.invokeLater(() -> {
             JTextArea chatArea = chatAreas.get(sessionId);
-            
+
             if (chatArea == null) {
-                // Create tab if it doesn't exist
                 String recipient = sessions.getOrDefault(sessionId, sender);
                 createSessionTab(sessionId, recipient);
                 chatArea = chatAreas.get(sessionId);
             }
-            
-            // Add timestamp
+
             SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss");
             String timestamp = sdf.format(new Date());
-            
+
             chatArea.append("[" + timestamp + "] " + sender + ": " + content + "\n");
             chatArea.setCaretPosition(chatArea.getDocument().getLength());
         });
     }
-    
+
     private void updateChatAreaWithSystemMessage(String sessionId, String message) {
         SwingUtilities.invokeLater(() -> {
             JTextArea chatArea = chatAreas.get(sessionId);
@@ -355,7 +332,7 @@ public class ChatUI extends JFrame {
             }
         });
     }
-    
+
     private void showInvitationDialog(String sessionId, String inviter) {
         SwingUtilities.invokeLater(() -> {
             String message = inviter + " wants to start a conversation with you.";
@@ -365,10 +342,9 @@ public class ChatUI extends JFrame {
                 "Chat Invitation",
                 JOptionPane.YES_NO_OPTION
             );
-            
+
             if (choice == JOptionPane.YES_OPTION) {
                 client.acceptSessionInvitation(sessionId);
-                // Create session tab
                 createSessionTab(sessionId, inviter);
                 sessions.put(sessionId, inviter);
                 updateChatAreaWithSystemMessage(sessionId, "You accepted " + inviter + "'s invitation");
@@ -377,29 +353,29 @@ public class ChatUI extends JFrame {
             }
         });
     }
-    
+
     private void showContactSearchDialog() {
         String email = JOptionPane.showInputDialog(
-            this, 
-            "Enter email to search for contacts:", 
-            "Find Contacts", 
+            this,
+            "Enter email to search for contacts:",
+            "Find Contacts",
             JOptionPane.QUESTION_MESSAGE
         );
-        
+
         if (email != null && !email.trim().isEmpty()) {
             client.searchContacts(email.trim());
         }
     }
-    
+
     private void handleSearchResults(String results) {
         SwingUtilities.invokeLater(() -> {
             String[] users = results.isEmpty() ? new String[0] : results.split(",");
-            
+
             if (users.length == 0) {
                 JOptionPane.showMessageDialog(this, "No users found with that email.");
                 return;
             }
-            
+
             JComboBox<String> userSelect = new JComboBox<>(users);
             int option = JOptionPane.showConfirmDialog(
                 this,
@@ -407,7 +383,7 @@ public class ChatUI extends JFrame {
                 "Add Contact",
                 JOptionPane.OK_CANCEL_OPTION
             );
-            
+
             if (option == JOptionPane.OK_OPTION) {
                 String selectedUser = (String) userSelect.getSelectedItem();
                 if (selectedUser != null) {
@@ -416,51 +392,24 @@ public class ChatUI extends JFrame {
             }
         });
     }
-    
+
     private void updateContactList(String[] contacts) {
         SwingUtilities.invokeLater(() -> {
             contactListModel.clear();
-            System.out.println("Updating contacts list with " + contacts.length + " contacts");
+            System.out.println("[UI] Updating contacts list with " + contacts.length + 
+                              " contacts: " + Arrays.toString(contacts));
             
             for (String contact : contacts) {
                 if (!contact.isEmpty()) {
                     contactListModel.addElement(contact);
-                    System.out.println("Added contact to list: " + contact);
+                    System.out.println("[UI] Added contact to list: " + contact);
                 }
             }
-        });
-    }
-
-        private void setupContactListInteraction() {
-        contactList.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    String contactName = contactList.getSelectedValue();
-                    if (contactName != null) {
-                        // Check if user is online by searching the user list model
-                        boolean isOnline = false;
-                        for (int i = 0; i < userListModel.getSize(); i++) {
-                            if (userListModel.getElementAt(i).equals(contactName)) {
-                                isOnline = true;
-                                break;
-                            }
-                        }
-                        
-                        if (isOnline) {
-                            // If online, create session
-                            client.createSession(contactName);
-                        } else {
-                            // If offline, show message
-                            JOptionPane.showMessageDialog(
-                                ChatUI.this,
-                                contactName + " is currently offline.",
-                                "User Offline",
-                                JOptionPane.INFORMATION_MESSAGE
-                            );
-                        }
-                    }
-                }
+            
+            // Debug final list content
+            System.out.println("[UI] Final contact list size: " + contactListModel.size());
+            for (int i = 0; i < contactListModel.size(); i++) {
+                System.out.println("[UI] Contact #" + i + ": " + contactListModel.get(i));
             }
         });
     }
