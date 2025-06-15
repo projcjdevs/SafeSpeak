@@ -34,8 +34,19 @@ public class MessageServer {
     
     public void registerClient(String username, ClientHandler handler) {
         clients.put(username, handler);
-        System.out.println("User registered: " + username);
+        System.out.println("User registered: " + username + ", total users: " + clients.size());
+        
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        // Send the complete user list to ALL clients, including the newly connected one
         broadcastUserList();
+        
+        String userList = "USERLIST:" + String.join(",", clients.keySet());
+        handler.sendMessage(userList);
     }
     
     public void removeClient(String username) {
@@ -47,12 +58,45 @@ public class MessageServer {
     private void broadcastUserList() {
         // Send updated user list to all clients
         String userList = "USERLIST:" + String.join(",", clients.keySet());
-        for (ClientHandler handler : clients.values()) {
+        System.out.println("Broadcasting user list: " + userList + " to " + clients.size() + " clients");
+        
+        // Debug: print all connected clients
+        System.out.println("Connected clients:");
+        for (String user : clients.keySet()) {
+            System.out.println("  - " + user);
+        }
+        
+        // Send to each client individually and verify
+        for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
+            String clientName = entry.getKey();
+            ClientHandler handler = entry.getValue();
+            System.out.println("Sending user list to client: " + clientName);
             handler.sendMessage(userList);
         }
     }
     
+    // Method that allow clients to request the user list
+    public void sendUserListToClient(String username) {
+        ClientHandler handler = clients.get(username);
+        if (handler != null) {
+            String userList = "USERLIST:" + String.join(",", clients.keySet());
+            System.out.println("EXPLICIT REQUEST: Sending user list to " + username + ": " + userList);
+            handler.sendMessage(userList);
+        } else {
+            System.out.println("ERROR: Cannot send user list to " + username + " - handler not found");
+        }
+    }
+        
     public void createSession(String creator, String recipient) {
+        // Check if both users exist
+        ClientHandler creatorHandler = clients.get(creator);
+        ClientHandler recipientHandler = clients.get(recipient);
+        
+        if (creatorHandler == null || recipientHandler == null) {
+            System.out.println("Cannot create session: one or both users not found");
+            return;
+        }
+        
         // Create a session
         Session session = new Session();
         String sessionId = session.getSessionId();
@@ -65,23 +109,10 @@ public class MessageServer {
         sessions.put(sessionId, session);
         
         // Notify both users
-        ClientHandler creatorHandler = clients.get(creator);
-        ClientHandler recipientHandler = clients.get(recipient);
+        creatorHandler.sendMessage("SESSION_CREATED:" + sessionId + ":" + recipient + ":PENDING");
+        recipientHandler.sendMessage("SESSION_INVITATION:" + sessionId + ":" + creator);
         
-        if (creatorHandler != null) {
-            creatorHandler.sendMessage("SESSION_CREATED:" + sessionId + ":" + recipient + ":PENDING");
-        }
-        
-        if (recipientHandler != null) {
-            recipientHandler.sendMessage("SESSION_INVITATION:" + sessionId + ":" + creator);
-        }
-        
-        // Add system message to session
-        SystemMessage message = new SystemMessage(
-            "Session created between " + creator + " and " + recipient + " (waiting for acceptance)",
-            SystemMessage.SystemMessageType.SESSION_CREATED
-        );
-        session.addMessage(message);
+        System.out.println("Created session " + sessionId + " between " + creator + " and " + recipient + " (pending)");
     }
     
     public void acceptSessionInvitation(String sessionId, String username) {
@@ -98,12 +129,16 @@ public class MessageServer {
                 }
             }
             
+            System.out.println(username + " accepted invitation to session " + sessionId);
+            
             // Add system message
             SystemMessage message = new SystemMessage(
                 username + " joined the conversation",
                 SystemMessage.SystemMessageType.USER_JOINED
             );
             session.addMessage(message);
+        } else {
+            System.out.println("Invalid session acceptance: " + sessionId + " by " + username);
         }
     }
     
@@ -119,6 +154,10 @@ public class MessageServer {
                     handler.sendMessage("SESSION_REJECTED:" + sessionId + ":" + username);
                 }
             }
+            
+            System.out.println(username + " rejected invitation to session " + sessionId);
+        } else {
+            System.out.println("Invalid session rejection: " + sessionId + " by " + username);
         }
     }
     
@@ -139,6 +178,10 @@ public class MessageServer {
                     }
                 }
             }
+            
+            System.out.println("Message sent in session " + sessionId + " from " + sender);
+        } else {
+            System.out.println("Invalid message send attempt to session " + sessionId + " from " + sender);
         }
     }
     

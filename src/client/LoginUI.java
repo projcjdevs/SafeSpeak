@@ -121,8 +121,18 @@ public class LoginUI extends JFrame {
         setVisible(false);
         dispose();
         SwingUtilities.invokeLater(() -> {
+            System.out.println("Opening chat window for " + usernameField.getText());
             ChatUI chatUI = new ChatUI(client);
             chatUI.setVisible(true);
+            
+            // Force contact list refresh after a short delay
+            Timer timer = new Timer(1000, e -> {
+                System.out.println("Delayed contact list refresh");
+                client.requestContactList();
+                client.requestUserList();
+            });
+            timer.setRepeats(false);
+            timer.start();
         });
     }
 }

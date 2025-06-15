@@ -6,6 +6,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import javax.swing.Timer;
 
 public class ChatUI extends JFrame {
     private MessageClient client;
@@ -23,15 +24,28 @@ public class ChatUI extends JFrame {
     // Track active sessions
     private Map<String, String> sessions = new HashMap<>(); // sessionId -> recipient
     
-    public ChatUI(MessageClient client) {
-        this.client = client;
-        setupUI();
-        
-        // Register message handler with client
-        client.setMessageHandler(this::processServerMessage);
-        
-        // Request contacts when starting
-        client.requestContactList();
+public ChatUI(MessageClient client) {
+    this.client = client;
+    setupUI();
+    
+    // Register message handler with client
+    client.setMessageHandler(this::processServerMessage);
+    
+    // Request initial data immediately
+    System.out.println("Initial data request");
+    client.requestContactList();
+    client.requestUserList();
+    
+    // Set up startup sequence to retry user list requests
+        for (int i = 1; i <= 3; i++) {
+            final int attempt = i;
+            Timer initialTimer = new Timer(i * 1000, e -> {
+                System.out.println("Startup request #" + attempt);
+                client.requestUserList();
+            });
+            initialTimer.setRepeats(false);
+            initialTimer.start();
+        }
     }
     
     private void setupUI() {
@@ -60,6 +74,14 @@ public class ChatUI extends JFrame {
         JScrollPane userListScroll = new JScrollPane(userList);
         userPanel.add(userListScroll, BorderLayout.CENTER);
         
+        // Debug button for refreshing users
+        JButton refreshButton = new JButton("Refresh Users");
+        refreshButton.addActionListener(e -> {
+            System.out.println("Manually refreshing user list");
+            client.requestUserList();
+        });
+        userPanel.add(refreshButton, BorderLayout.SOUTH);
+        
         // Contact panel
         JPanel contactPanel = new JPanel(new BorderLayout());
         contactPanel.setBorder(BorderFactory.createTitledBorder("Known Connections"));
@@ -71,7 +93,15 @@ public class ChatUI extends JFrame {
         JPanel contactButtonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton addContactButton = new JButton("Add Contact");
         addContactButton.addActionListener(e -> showContactSearchDialog());
+        
+        JButton refreshContactsButton = new JButton("Refresh Contacts");
+        refreshContactsButton.addActionListener(e -> {
+            System.out.println("Manually refreshing contacts");
+            client.requestContactList();
+        });
+        
         contactButtonPanel.add(addContactButton);
+        contactButtonPanel.add(refreshContactsButton);
         
         contactPanel.add(contactScroll, BorderLayout.CENTER);
         contactPanel.add(contactButtonPanel, BorderLayout.SOUTH);
@@ -132,7 +162,9 @@ public class ChatUI extends JFrame {
         // Handle different message types
         switch (command) {
             case "USERLIST":
-                updateUserList(parts.length > 1 ? parts[1].split(",") : new String[0]);
+                String userListStr = parts.length > 1 ? parts[1] : "";
+                System.out.println("Received user list: " + userListStr);
+                updateUserList(userListStr.isEmpty() ? new String[0] : userListStr.split(","));
                 break;
                 
             case "SESSION_CREATED":
@@ -181,18 +213,24 @@ public class ChatUI extends JFrame {
                 break;
                 
             case "SEARCH_RESULTS":
-                handleSearchResults(parts.length > 1 ? parts[1] : "");
+                String searchResults = parts.length > 1 ? parts[1] : "";
+                System.out.println("Received search results: " + searchResults);
+                handleSearchResults(searchResults);
                 break;
                 
             case "CONTACT_LIST":
-                updateContactList(parts.length > 1 ? parts[1].split(",") : new String[0]);
+                String contactsStr = parts.length > 1 ? parts[1] : "";
+                System.out.println("Received contact list: " + contactsStr);
+                String[] contacts = contactsStr.isEmpty() ? new String[0] : contactsStr.split(",");
+                updateContactList(contacts);
                 break;
                 
             case "CONTACT_ADDED":
                 if (parts.length >= 2) {
                     String contact = parts[1];
                     JOptionPane.showMessageDialog(this, contact + " added to your contacts!");
-                    client.requestContactList(); // Refresh list
+                    // Refresh contacts
+                    client.requestContactList();
                 }
                 break;
                 
@@ -204,14 +242,21 @@ public class ChatUI extends JFrame {
     private void updateUserList(String[] users) {
         SwingUtilities.invokeLater(() -> {
             userListModel.clear();
+            System.out.println("Updating user list with " + users.length + " users: " + 
+                            Arrays.toString(users));
+            
             for (String user : users) {
                 // Don't show ourselves in the list
-                if (!user.isEmpty() && !user.equals(username)) {
-                    userListModel.addElement(user);
-                } else if (user.equals(username)) {
-                    // Set our username
-                    this.username = user;
-                    setTitle("SafeSpeak - " + username);
+                if (!user.isEmpty()) {
+                    if (user.equals(client.getUsername())) {
+                        // Set our username and don't add to list
+                        this.username = user;
+                        setTitle("SafeSpeak - " + username);
+                        System.out.println("Identified self as: " + username);
+                    } else {
+                        userListModel.addElement(user);
+                        System.out.println("Added online user: " + user);
+                    }
                 }
             }
         });
@@ -375,9 +420,12 @@ public class ChatUI extends JFrame {
     private void updateContactList(String[] contacts) {
         SwingUtilities.invokeLater(() -> {
             contactListModel.clear();
+            System.out.println("Updating contacts list with " + contacts.length + " contacts");
+            
             for (String contact : contacts) {
                 if (!contact.isEmpty()) {
                     contactListModel.addElement(contact);
+                    System.out.println("Added contact to list: " + contact);
                 }
             }
         });

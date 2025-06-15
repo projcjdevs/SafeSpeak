@@ -2,6 +2,7 @@ package client;
 
 import java.io.*;
 import java.net.Socket;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -16,20 +17,28 @@ public class MessageClient {
     private boolean connected = false;
     private Thread receiveThread;
     private Consumer<String> messageHandler;
+    private String clientId = UUID.randomUUID().toString().substring(0, 8);
 
     public MessageClient() {
         messageQueue = new LinkedBlockingQueue<>();
     }
 
+
+
     public boolean connect(String host, int port) {
         try {
+            System.out.println("Client " + clientId + " connecting to server " + host + ":" + port);
             socket = new Socket(host, port);
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             connected = true;
+            System.out.println("Client " + clientId + " connected to server successfully");
             
             // Start thread to receive messages
-            receiveThread = new Thread(this::receiveMessages);
+            receiveThread = new Thread(() -> {
+                Thread.currentThread().setName("ClientReceiver-" + clientId);
+                receiveMessages();
+            });
             receiveThread.setDaemon(true);
             receiveThread.start();
             
@@ -43,6 +52,7 @@ public class MessageClient {
     public boolean authenticate(String username, String password) {
         if (!connected) return false;
         this.username = username;
+        System.out.println("Sending authentication request for " + username);
         out.println("AUTH:" + username + ":" + password);
         
         try {
@@ -55,7 +65,14 @@ public class MessageClient {
                 return false;
             }
             
-            return "AUTH_SUCCESS".equals(response);
+            boolean success = "AUTH_SUCCESS".equals(response);
+            if (success) {
+                // Request contact list immediately after successful authentication
+                requestContactList();
+                // Request user list as well
+                requestUserList();
+            }
+            return success;
         } catch (InterruptedException e) {
             System.out.println("Authentication interrupted: " + e.getMessage());
             Thread.currentThread().interrupt();
@@ -94,10 +111,8 @@ public class MessageClient {
     
     public void sendMessage(String sessionId, String content) {
         if (!connected) return;
-        // Escape colons with backslash to prevent protocol issues
-        String escapedContent = content.replace(":", "\\:");
-        System.out.println("Sending message to session " + sessionId + ": " + escapedContent);
-        out.println("MSG:" + sessionId + ":" + escapedContent);
+        System.out.println("Sending message to session " + sessionId + ": " + content);
+        out.println("MSG:" + sessionId + ":" + content);
     }
     
     public void acceptSessionInvitation(String sessionId) {
@@ -130,6 +145,12 @@ public class MessageClient {
         out.println("GET_CONTACTS");
     }
     
+    public void requestUserList() {
+        if (!connected) return;
+        System.out.println("Requesting user list");
+        out.println("GET_USERS");
+    }
+    
     public void setMessageHandler(Consumer<String> handler) {
         this.messageHandler = handler;
     }
@@ -143,8 +164,9 @@ public class MessageClient {
                 // Add to queue for auth/register handling
                 messageQueue.put(message);
                 
-                // Also pass to UI handler if set (except auth messages which are handled separately)
+                // Also pass to UI handler if set
                 if (messageHandler != null) {
+                    // Only skip direct handling for authentication messages
                     if (message.equals("AUTH_SUCCESS") || message.equals("AUTH_FAILED") ||
                         message.equals("REGISTER_SUCCESS") || message.equals("REGISTER_FAILED")) {
                         // These messages are already handled by the queue

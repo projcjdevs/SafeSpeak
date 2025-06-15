@@ -10,9 +10,7 @@ public class dbInitializer {
     public static void main(String[] args) {
         initDatabase();
         printDatabaseStructure();
-        printTableSchema("users");
-        printTableSchema("contacts");
-        listUsers();
+        printContactRelationships();
     }
     
     public static void initDatabase() {
@@ -21,7 +19,7 @@ public class dbInitializer {
             
             System.out.println("Initializing database...");
             
-            // Users table
+            // First create users table
             String createUserTable = 
                 "CREATE TABLE IF NOT EXISTS users (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -32,9 +30,9 @@ public class dbInitializer {
                 ");";
             
             stmt.execute(createUserTable);
-            System.out.println("Users table initialized");
+            System.out.println("Users table initialized successfully!");
             
-            // Contacts table
+            // Then create contacts table
             String createContactsTable = 
                 "CREATE TABLE IF NOT EXISTS contacts (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -46,18 +44,7 @@ public class dbInitializer {
                 ");";
             
             stmt.execute(createContactsTable);
-            System.out.println("Contacts table initialized");
-            
-            // Add test user if not exists
-            String checkUser = "SELECT COUNT(*) FROM users WHERE username = 'test'";
-            ResultSet rs = stmt.executeQuery(checkUser);
-            if (rs.next() && rs.getInt(1) == 0) {
-                String addUser = "INSERT INTO users (username, password, email) VALUES ('test', 'test', 'test@example.com')";
-                stmt.execute(addUser);
-                System.out.println("Test user added");
-            } else {
-                System.out.println("Test user already exists");
-            }
+            System.out.println("Contacts table initialized successfully!");
             
             System.out.println("Database initialization completed successfully");
             
@@ -82,7 +69,7 @@ public class dbInitializer {
                 ResultSet columns = meta.getColumns(null, null, tableName, "%");
                 while (columns.next()) {
                     System.out.println("  " + columns.getString("COLUMN_NAME") + 
-                                      " (" + columns.getString("TYPE_NAME") + ")");
+                                     " (" + columns.getString("TYPE_NAME") + ")");
                 }
             }
         } catch (SQLException e) {
@@ -90,35 +77,51 @@ public class dbInitializer {
         }
     }
     
-    public static void printTableSchema(String tableName) {
+    public static void printContactRelationships() {
         try (Connection conn = dbConnector.getConnection();
              Statement stmt = conn.createStatement()) {
             
-            ResultSet rs = stmt.executeQuery("PRAGMA table_info(" + tableName + ")");
-            System.out.println("Schema for table " + tableName + ":");
+            ResultSet rs = stmt.executeQuery(
+                "SELECT u1.username as user, u2.username as contact " +
+                "FROM contacts c " +
+                "JOIN users u1 ON c.user_id = u1.id " +
+                "JOIN users u2 ON c.contact_id = u2.id"
+            );
+            
+            System.out.println("Contact relationships in database:");
+            boolean hasContacts = false;
+            
             while (rs.next()) {
-                System.out.println("  " + rs.getString("name") + " (" + 
-                                 rs.getString("type") + ", " + 
-                                 (rs.getInt("notnull") == 1 ? "NOT NULL" : "NULL") + ")");
+                hasContacts = true;
+                System.out.println("  " + rs.getString("user") + " -> " + rs.getString("contact"));
+            }
+            
+            if (!hasContacts) {
+                System.out.println("  No contact relationships found in database.");
             }
         } catch (SQLException e) {
-            System.out.println("Error getting schema: " + e.getMessage());
+            System.out.println("Error printing contacts: " + e.getMessage());
+            e.printStackTrace();
         }
     }
     
-    public static void listUsers() {
+    public static void clearDatabase() {
         try (Connection conn = dbConnector.getConnection();
              Statement stmt = conn.createStatement()) {
             
-            ResultSet rs = stmt.executeQuery("SELECT id, username, email FROM users");
-            System.out.println("Users in database:");
-            while (rs.next()) {
-                System.out.println("  ID=" + rs.getInt("id") + 
-                                 ", Username=" + rs.getString("username") +
-                                 ", Email=" + rs.getString("email"));
-            }
-        } catch (SQLException e) {
-            System.out.println("Error listing users: " + e.getMessage());
+            System.out.println("Clearing database...");
+            
+            // Delete all data
+            stmt.executeUpdate("DELETE FROM contacts");
+            stmt.executeUpdate("DELETE FROM users");
+            
+            // Reset auto-increment
+            stmt.executeUpdate("DELETE FROM sqlite_sequence WHERE name='users' OR name='contacts'");
+            
+            System.out.println("Database cleared successfully!");
+            
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 }

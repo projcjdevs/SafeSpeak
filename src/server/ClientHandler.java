@@ -54,7 +54,7 @@ public class ClientHandler implements Runnable {
 
     private void processMessage(String message) {
         System.out.println("Processing message: " + message); // Debug
-        String[] parts = message.split(":", 4); // Ensure we can handle email with colons
+        String[] parts = message.split(":", 4); // Split with limit to handle content with colons
 
         if (parts.length < 2) {
             System.out.println("Invalid message format: " + message);
@@ -90,11 +90,11 @@ public class ClientHandler implements Runnable {
                 this.username = username;
                 this.authenticated = true;
                 sendMessage("AUTH_SUCCESS");
-                System.out.println("Sent AUTH_SUCCESS to client");
+                System.out.println("Authentication successful for: " + username);
                 server.registerClient(username, this);
             } else {
                 sendMessage("AUTH_FAILED");
-                System.out.println("Sent AUTH_FAILED to client");
+                System.out.println("Authentication failed for: " + username);
             }
             return;
         }
@@ -154,6 +154,11 @@ public class ClientHandler implements Runnable {
         else if (command.equals("GET_CONTACTS")) {
             System.out.println(username + " requested contact list");
             sendContactList();
+        }
+        // Request user list
+        else if (command.equals("GET_USERS")) {
+            System.out.println(username + " requested user list");
+            server.sendUserListToClient(username);
         }
     }
 
@@ -258,8 +263,20 @@ public class ClientHandler implements Runnable {
             stmt.setInt(2, contactId);
             
             int affected = stmt.executeUpdate();
-            System.out.println("Added contact: " + (affected > 0 ? "success" : "already exists"));
-            return true; // Return true even if already exists to avoid confusion
+            System.out.println("Added contact relationship: " + username + " -> " + contactUsername 
+                             + " (rows affected: " + affected + ")");
+                             
+            // For debugging: verify the contact was added
+            String checkQuery = "SELECT COUNT(*) FROM contacts WHERE user_id = ? AND contact_id = ?";
+            PreparedStatement checkStmt = conn.prepareStatement(checkQuery);
+            checkStmt.setInt(1, userId);
+            checkStmt.setInt(2, contactId);
+            ResultSet rs = checkStmt.executeQuery();
+            if (rs.next()) {
+                System.out.println("Verified contact relationship exists: " + rs.getInt(1) + " rows found");
+            }
+            
+            return true; // Even if already exists (affected = 0), consider it success
         } catch (SQLException e) {
             System.out.println("Error adding contact: " + e.getMessage());
             e.printStackTrace();
@@ -281,14 +298,24 @@ public class ClientHandler implements Runnable {
 
     private void sendContactList() {
         try (Connection conn = dbConnector.getConnection()) {
-            int userId = getUserId(conn, username);
+            System.out.println("Fetching contact list for " + username);
             
-            if (userId == -1) {
-                System.out.println("Cannot fetch contacts: User ID not found");
+            // First get the user ID from username
+            String userIdQuery = "SELECT id FROM users WHERE username = ?";
+            PreparedStatement userStmt = conn.prepareStatement(userIdQuery);
+            userStmt.setString(1, username);
+            ResultSet userRs = userStmt.executeQuery();
+            
+            if (!userRs.next()) {
+                System.out.println("Cannot fetch contacts: User ID not found for " + username);
                 sendMessage("CONTACT_LIST:");
                 return;
             }
             
+            int userId = userRs.getInt("id");
+            System.out.println("Found user ID for " + username + ": " + userId);
+            
+            // Now get their contacts
             String query = 
                 "SELECT u.username FROM users u " +
                 "JOIN contacts c ON u.id = c.contact_id " +
@@ -301,11 +328,13 @@ public class ClientHandler implements Runnable {
             List<String> contacts = new ArrayList<>();
             
             while (rs.next()) {
-                contacts.add(rs.getString("username"));
+                String contactName = rs.getString("username");
+                contacts.add(contactName);
+                System.out.println("Found contact for " + username + ": " + contactName);
             }
             
             String contactList = "CONTACT_LIST:" + String.join(",", contacts);
-            System.out.println("Sending contact list with " + contacts.size() + " contacts");
+            System.out.println("Sending contact list to " + username + ": " + contactList);
             sendMessage(contactList);
         } catch (SQLException e) {
             System.out.println("Error fetching contacts: " + e.getMessage());
